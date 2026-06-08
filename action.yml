@@ -1,0 +1,177 @@
+name: Dependency Advisor Scan
+description: Run depadvisor scan against a checked-out repository.
+inputs:
+  path:
+    description: Path to the repository or subdirectory to scan.
+    required: false
+    default: .
+  policy:
+    description: Policy mode passed to depadvisor scan.
+    required: false
+    default: standard
+  fail-on-findings:
+    description: Fail the action when depadvisor reports findings.
+    required: false
+    default: "false"
+  python-version:
+    description: Python version used to run uv.
+    required: false
+    default: "3.13"
+  json-output:
+    description: Path for the JSON report.
+    required: false
+    default: dependency-advisor.json
+  sarif-output:
+    description: Path for the SARIF report.
+    required: false
+    default: dependency-advisor.sarif
+  markdown-output:
+    description: Path for the Markdown report.
+    required: false
+    default: dependency-advisor.md
+outputs:
+  json_output:
+    description: Path to the generated JSON report.
+    value: ${{ steps.scan.outputs.json_output }}
+  sarif_output:
+    description: Path to the generated SARIF report.
+    value: ${{ steps.scan.outputs.sarif_output }}
+  markdown_output:
+    description: Path to the generated Markdown report.
+    value: ${{ steps.scan.outputs.markdown_output }}
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v8.1.0
+      with:
+        enable-cache: true
+
+    - id: scan
+      name: Run depadvisor scan
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        repo_root="${{ github.workspace }}"
+        action_root="${{ github.action_path }}"
+        path="${{ inputs.path }}"
+        policy="${{ inputs.policy }}"
+        fail_on_findings="${{ inputs.fail-on-findings }}"
+        json_output="${{ inputs.json-output }}"
+        sarif_output="${{ inputs.sarif-output }}"
+        markdown_output="${{ inputs.markdown-output }}"
+
+        resolve_path() {
+          local candidate="$1"
+          if [[ "$candidate" = /* ]]; then
+            printf '%s\n' "$candidate"
+          else
+            printf '%s/%s\n' "$repo_root" "$candidate"
+          fi
+        }
+
+        scan_path="$(resolve_path "$path")"
+        json_output="$(resolve_path "$json_output")"
+        sarif_output="$(resolve_path "$sarif_output")"
+        markdown_output="$(resolve_path "$markdown_output")"
+
+        mkdir -p \
+          "$(dirname "$json_output")" \
+          "$(dirname "$sarif_output")" \
+          "$(dirname "$markdown_output")"
+
+        cd "$action_root"
+        uv sync --all-groups
+
+        args=(
+          scan
+          "$scan_path"
+          --policy "$policy"
+          --json-output "$json_output"
+          --sarif-output "$sarif_output"
+          --markdown-output "$markdown_output"
+        )
+
+        if [[ "$fail_on_findings" == "true" ]]; then
+          args+=(--fail-on-findings)
+        fi
+
+        uv run depadvisor "${args[@]}"
+
+        printf 'json_output=%s\n' "$json_output" >> "$GITHUB_OUTPUT"
+        printf 'sarif_output=%s\n' "$sarif_output" >> "$GITHUB_OUTPUT"
+        printf 'markdown_output=%s\n' "$markdown_output" >> "$GITHUB_OUTPUT"
+
+    - name: Publish rich summary
+      if: always()
+      shell: bash
+      env:
+        JSON_OUTPUT: ${{ steps.scan.outputs.json_output }}
+        MARKDOWN_OUTPUT: ${{ steps.scan.outputs.markdown_output }}
+      run: |
+        set -euo pipefail
+
+        python - <<'PY'
+        import json
+        import os
+        from pathlib import Path
+
+        json_path = Path(os.environ["JSON_OUTPUT"])
+        markdown_path = Path(os.environ["MARKDOWN_OUTPUT"])
+        summary_path = Path(os.environ["GITHUB_STEP_SUMMARY"])
+
+        if not json_path.is_file():
+            summary_path.write_text(
+                "# Dependency Advisor Scan\n\nNo JSON report was produced for this run.\n",
+                encoding="utf-8",
+            )
+            raise SystemExit(0)
+
+        report = json.loads(json_path.read_text(encoding="utf-8"))
+        summary = report["summary"]
+        status_counts = summary.get("status_counts", {})
+
+        lines: list[str] = []
+        lines.append("# Dependency Advisor Scan")
+        lines.append("")
+        lines.append("| Metric | Value |")
+        lines.append("| --- | --- |")
+        lines.append(f"| Root | `{report['root_path']}` |")
+        lines.append(f"| Policy | `{report['policy']}` |")
+        lines.append(f"| Manifests scanned | {summary['manifests_scanned']} |")
+        lines.append(f"| Dependencies scanned | {summary['dependencies_scanned']} |")
+        lines.append(f"| Findings | {summary['findings']} |")
+        lines.append("")
+        lines.append("## Status Counts")
+        lines.append("")
+        lines.append("| Status | Count |")
+        lines.append("| --- | ---: |")
+        for status, count in sorted(status_counts.items()):
+            lines.append(f"| `{status}` | {count} |")
+        lines.append("")
+
+        if report["results"]:
+            lines.append("## Top Findings")
+            lines.append("")
+            for finding in report["results"][:5]:
+                lines.append(
+                    "- `{package}` in `{manifest_path}` -> `{status}`: {reason}".format(
+                        package=finding["package"],
+                        manifest_path=finding["manifest_path"],
+                        status=finding["status"],
+                        reason=finding["reason"],
+                    )
+                )
+        else:
+            lines.append("> No findings detected.")
+
+        lines.append("")
+        lines.append(f"Markdown report: `{markdown_path}`")
+        summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        PY

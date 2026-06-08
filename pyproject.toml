@@ -1,0 +1,74 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dependency-advisor"
+version = "0.1.0"
+description = "Agent-first dependency safety advisor."
+readme = "README.md"
+requires-python = ">=3.13"
+license = { file = "LICENSE" }
+authors = [{ name = "Dependency Advisor contributors" }]
+dependencies = [
+  "packaging>=24,<26",
+  "httpx>=0.28,<1",
+  "pydantic>=2.11,<3",
+  "typer>=0.20,<1",
+]
+keywords = ["dependency", "security", "cli", "agents", "advisory"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Topic :: Software Development :: Quality Assurance",
+  "Topic :: Security",
+  "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/djh00t/dependency-advisor"
+Repository = "https://github.com/djh00t/dependency-advisor"
+Issues = "https://github.com/djh00t/dependency-advisor/issues"
+Changelog = "https://github.com/djh00t/dependency-advisor/blob/main/CHANGELOG.md"
+
+[project.scripts]
+depadvisor = "dependency_advisor.cli:main"
+
+[dependency-groups]
+dev = [
+  "mypy>=1.16",
+  "pdoc>=15",
+  "pytest>=8.4",
+  "pytest-bdd>=8.1",
+  "pytest-cov>=6.1",
+  "ruff>=0.11",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dependency_advisor"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "RUF"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+packages = ["dependency_advisor"]
+
+[tool.pytest.ini_options]
+addopts = "--cov=dependency_advisor --cov-report=term-missing --cov-fail-under=80"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["dependency_advisor"]
