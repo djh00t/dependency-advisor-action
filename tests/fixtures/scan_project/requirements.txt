@@ -1,0 +1,3 @@
+# Exercise requirements parsing.
+requests==2.32.4
+another-unknown==0.0.1
